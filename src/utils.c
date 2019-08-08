@@ -114,18 +114,18 @@ int checkConvergence(double *beta, double *beta_old, double eps, int p, int l) {
 
 ///////////////////////////////////////////////////////////////////////////////////////
 SEXP cleanupCRR(double *a, double *eta, double *diffBeta,
-                SEXP beta, SEXP Dev, SEXP iter, SEXP linpred, SEXP tstp) {
+                SEXP beta, SEXP Dev, SEXP iter, SEXP linpred) {
   Free(a);
   Free(eta);
   Free(diffBeta);
   SEXP res;
-  PROTECT(res = allocVector(VECSXP, 5));
+  PROTECT(res = allocVector(VECSXP, 4));
   SET_VECTOR_ELT(res, 0, beta); //coefficient estimates
   SET_VECTOR_ELT(res, 1, Dev); //deviance = -2*loglik
   SET_VECTOR_ELT(res, 2, iter); //iterations until convergence
   SET_VECTOR_ELT(res, 3, linpred); //hessian
-  SET_VECTOR_ELT(res, 4, tstp);
-  UNPROTECT(6);
+  //SET_VECTOR_ELT(res, 4, linpred);
+  UNPROTECT(5);
   return(res);
 }
 
@@ -137,17 +137,16 @@ SEXP cleanupCRR(double *a, double *eta, double *diffBeta,
 //lambda = tuning parameter
 //esp_ = epsilon (thershold)
 //max_iter_ = max iterations
-
-SEXP ccd_ridge(SEXP x_, SEXP y_, SEXP lambda_,
+SEXP ccd_ridge0(SEXP x_, SEXP y_, SEXP lambda_,
                SEXP esp_, SEXP max_iter_, SEXP multiplier) {
-
+  
   //Declaration
   int n = length(y_);
   int p = length(x_) / n;
   double nullDev;
-
+  
   //Output
-  SEXP res, beta, Dev, iter, linpred, tst;
+  SEXP res, beta, Dev, iter, linpred;
   PROTECT(beta = allocVector(REALSXP, p));
   double *b = REAL(beta);
   for (int j = 0; j < p; j++) b[j] = 0;
@@ -158,15 +157,130 @@ SEXP ccd_ridge(SEXP x_, SEXP y_, SEXP lambda_,
   PROTECT(linpred = allocVector(REALSXP, n));
   double *lp = REAL(linpred);
   for (int i = 0; i <  n; i++) lp[i] = 0;
-  PROTECT(tst = allocVector(REALSXP, p));
-  double *tstp = REAL(tst);
-  for (int i = 0; i <  p; i++) tstp[i] = 0;
-
+  //PROTECT(tst = allocVector(REALSXP, p));
+  //double *tstp = REAL(tst);
+  //for (int i = 0; i <  p; i++) tstp[i] = 0;
+  
   //Intermediate quantities for internal use
   double *a = Calloc(p, double); // Beta from previous iteration
   for (int j = 0; j < p; j++) a[j] = 0;
   double *eta = Calloc(n, double);
   for (int i = 0; i < n; i++) eta[i] = 0;
+  double *diffBeta = Calloc(p, double);
+  for (int j = 0; j < p; j++) diffBeta[j] = 1;
+  
+  double grad, hess, l1, shift, si, delta;
+  int converged;
+  //double sqsum = 0; //CAESAR Add
+  
+  //Pointers
+  double *x = REAL(x_);
+  double *y = REAL(y_);
+  double lam = REAL(lambda_)[0];
+  double esp = REAL(esp_)[0];
+  double *m = REAL(multiplier);
+  int max_iter = INTEGER(max_iter_)[0];
+  
+  
+  //end of declaration;
+  
+  //initialization
+  nullDev = -2 * getLogLikelihood(y, eta, n); // Calculate null deviance at beta = 0
+  
+  //for (int j = 0; j < p; j++) a[j] = b[j];
+  
+  while (INTEGER(iter)[0] < 1000) {
+    //if (REAL(Dev)[0] - nullDev > 0.99 * nullDev) break;
+    
+    INTEGER(iter)[0]++;
+    
+    
+    // calculate gradient & hessian andupdate beta_j
+    for (int j = 0; j < p; j++) {
+      grad = -getGradient(x, y, eta, n, j); // jth component of gradient [l'(b)]
+      hess = getHessian(x, eta, n, j); // jth component of hessian [l''(b)]
+      l1 = m[j] * lam; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
+      
+      //delta =  -(grad / n + a[j] * l1 / n) / (hess / n + l1);
+      //u   = grad / n + (hess / n) * a[j]; // z in paper
+      //v   = hess / n;
+      
+      //CAESAR add change l1 scale, to not divided by n
+      //if(j >= p) {
+      //  delta =  -(grad / n + a[j] * l1 / sqrt(sqsum)) / (hess / n + l1 * (1/sqrt(sqsum) - a[j] / pow(sqsum, 3/2)));
+      //} else {
+      delta =  -(grad / n + 2 * a[j] * l1) / (hess / n + 2 * l1);
+      //}
+      
+      // Do one dimensional ridge update.
+      // Employ trust region as in Genkin et al. (2007) for quadratic approximation.
+      b[j] = a[j] + sgn(delta) * fmin(fabs(delta), diffBeta[j]);
+      diffBeta[j] = fmax(2 * fabs(delta), diffBeta[j] / 2);
+      //b[j] = a[j] + (xwr / n - a[j] * l1) / (xwx / n + l1);
+      
+      // CAESAR ADD
+      //sqsum = sqsum - pow(a[j], 2) + pow(b[j], 2);
+      
+      // Update r
+      shift = b[j] - a[j];
+      if (shift != 0) {
+        for (int i = 0; i < n; i++) {
+          si = shift * x[j * n + i];
+          eta[i] += si;
+        }
+      } //end shift
+      
+    } //for j = 0 to (p - 1)
+    // Check for convergence
+    converged = checkConvergence(b, a, esp, p, 0);
+    for (int i = 0; i < p; i++)
+      a[i] = b[i];
+    
+    //Calculate deviance
+    REAL(Dev)[0] = -2 * getLogLikelihood(y, eta, n);
+    
+    //for (int i = 0; i < n; i++){
+    //  lp[i] = eta[i];
+    //}
+    if (converged)  break;
+    //for converge
+  } //for while loop
+  
+  res = cleanupCRR(a, eta, diffBeta, beta, Dev, iter, linpred);
+  return(res);
+}
+
+SEXP ccd_ridge(SEXP x_, SEXP y_, SEXP lambda_,
+               SEXP esp_, SEXP max_iter_, SEXP multiplier) {
+
+  //Declaration
+  int n = length(y_);
+  int p = length(x_) / n;
+  int L = length(lambda_);
+  //int L = 1;
+  double nullDev;
+
+  //Output
+  SEXP res, beta, Dev, iter, linpred, tst;
+  PROTECT(beta = allocVector(REALSXP, L * p));
+  double *b = REAL(beta);
+  for (int j = 0; j < (L * p); j++) b[j] = 0;
+  PROTECT(Dev = allocVector(REALSXP, 1));
+  for (int i = 0; i < 1; i++) REAL(Dev)[i] = 0;
+  PROTECT(iter = allocVector(INTSXP, 1));
+  for (int i = 0; i < 1; i++) INTEGER(iter)[i] = 0;
+  PROTECT(linpred = allocVector(REALSXP, n));
+  double *lp = REAL(linpred);
+  for (int i = 0; i <  n; i++) lp[i] = 0;
+  //PROTECT(tst = allocVector(REALSXP, p));
+  //double *tstp = REAL(tst);
+  //for (int i = 0; i <  p; i++) tstp[i] = 0;
+
+  //Intermediate quantities for internal use
+  double *a = Calloc(p, double); // Beta from previous iteration
+  //for (int j = 0; j < p; j++) a[j] = 0;
+  double *eta = Calloc(n, double);
+  //for (int i = 0; i < n; i++) eta[i] = 0;
   double *diffBeta = Calloc(p, double);
   for (int j = 0; j < p; j++) diffBeta[j] = 1;
 
@@ -176,68 +290,78 @@ SEXP ccd_ridge(SEXP x_, SEXP y_, SEXP lambda_,
   //Pointers
   double *x = REAL(x_);
   double *y = REAL(y_);
-  double lam = REAL(lambda_)[0];
+  double *lam = REAL(lambda_);
+  //double lam = REAL(lambda_)[0];
   double esp = REAL(esp_)[0];
   double *m = REAL(multiplier);
   int max_iter = INTEGER(max_iter_)[0];
 
 
   //end of declaration;
-
-  //initialization
-  nullDev = -2 * getLogLikelihood(y, eta, n); // Calculate null deviance at beta = 0
-
-  for (int j = 0; j < p; j++) a[j] = b[j];
-
-  while (INTEGER(iter)[0] < 1000) {
-    if (REAL(Dev)[0] - nullDev > 0.99 * nullDev) break;
-
-    INTEGER(iter)[0]++;
-
-
-    // calculate gradient & hessian andupdate beta_j
-    for (int j = 0; j < p; j++) {
-      grad = -getGradient(x, y, eta, n, j); // jth component of gradient [l'(b)]
-      hess = getHessian(x, eta, n, j); // jth component of hessian [l''(b)]
-      l1 = m[j] * lam ; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
-
-      delta =  -(grad / n + a[j] * l1 / n) / (hess / n + l1);
-      //u   = grad / n + (hess / n) * a[j]; // z in paper
-      //v   = hess / n;
-
-
-      // Do one dimensional ridge update.
-      // Employ trust region as in Genkin et al. (2007) for quadratic approximation.
-      b[j] = a[j] + sgn(delta) * fmin(fabs(delta), diffBeta[j]);
-      diffBeta[j] = fmax(2 * fabs(delta), diffBeta[j] / 2);
-      //b[j] = a[j] + (xwr / n - a[j] * l1) / (xwx / n + l1);
-
-      // Update r
-      shift = b[j] - a[j];
-      if (shift != 0) {
-        for (int i = 0; i < n; i++) {
-          si = shift * x[j * n + i];
-          eta[i] += si;
-        }
-      } //end shift
-
-    } //for j = 0 to (p - 1)
-    // Check for convergence
-    converged = checkConvergence(b, a, esp, p, 0);
-    for (int i = 0; i < p; i++)
-      a[i] = b[i];
-
-    //Calculate deviance
-    REAL(Dev)[0] = -2 * getLogLikelihood(y, eta, n);
-
-    for (int i = 0; i < n; i++){
-      lp[i] = eta[i];
-    }
-    if (converged)  break;
-    //for converge
-  } //for while loop
-
-  res = cleanupCRR(a, eta, diffBeta, beta, Dev, iter, linpred, tst);
+  
+  for(int l = 0; l < L; l++) {
+    
+    // reinitialize eta
+    for (int i = 0; i < n; i++) eta[i] = 0;
+    
+    for (int j = 0; j < p; j++) diffBeta[j] = 1; //reinitialize diffBeta
+    
+    //initialization
+    nullDev = -2 * getLogLikelihood(y, eta, n); // Calculate null deviance at beta = 0
+  
+    for (int j = 0; j < p; j++) a[j] = 0;
+    INTEGER(iter)[0] = 0;
+  
+    while (INTEGER(iter)[0] < 1000) {
+      if (REAL(Dev)[0] - nullDev > 0.99 * nullDev) break;
+  
+      INTEGER(iter)[0]++;
+  
+  
+      // calculate gradient & hessian andupdate beta_j
+      for (int j = 0; j < p; j++) {
+        grad = -getGradient(x, y, eta, n, j); // jth component of gradient [l'(b)]
+        hess = getHessian(x, eta, n, j); // jth component of hessian [l''(b)]
+        l1 = m[j] * lam[l] ; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
+  
+        delta =  -(grad / n + a[j] * l1 / n) / (hess / n + l1);
+        //u   = grad / n + (hess / n) * a[j]; // z in paper
+        //v   = hess / n;
+  
+  
+        // Do one dimensional ridge update.
+        // Employ trust region as in Genkin et al. (2007) for quadratic approximation.
+        b[l * p + j] = a[j] + sgn(delta) * fmin(fabs(delta), diffBeta[j]);
+        diffBeta[j] = fmax(2 * fabs(delta), diffBeta[j] / 2);
+        //b[j] = a[j] + (xwr / n - a[j] * l1) / (xwx / n + l1);
+  
+        // Update r
+        shift = b[l * p + j] - a[j];
+        if (shift != 0) {
+          for (int i = 0; i < n; i++) {
+            si = shift * x[j * n + i];
+            eta[i] += si;
+          }
+        } //end shift
+  
+      } //for j = 0 to (p - 1)
+      // Check for convergence
+      converged = checkConvergence(b, a, esp, p, l);
+      for (int i = 0; i < p; i++)
+        a[i] = b[l * p + i];
+  
+      //Calculate deviance
+      REAL(Dev)[0] = -2 * getLogLikelihood(y, eta, n);
+  
+      //for (int i = 0; i < n; i++){
+      //  lp[i] = eta[i];
+      //}
+      if (converged)  break;
+      //for converge
+    } //for while loop
+  }// lambda loop
+    
+  res = cleanupCRR(a, eta, diffBeta, beta, Dev, iter, linpred);
   return(res);
 }
 
@@ -261,6 +385,153 @@ double newBarL0(double h, double g, double b, double l) {
 //esp_ = epsilon (thershold)
 //max_iter_ = max iterations
 
+
+SEXP ccd_bar0(SEXP x_, SEXP y_, SEXP lambda_,
+             SEXP esp_, SEXP max_iter_, SEXP beta0_) {
+  
+  //Declaration
+  int n = length(y_);
+  int p = length(x_) / n;
+  int L = length(lambda_);
+  double nullDev;
+  
+  //Output
+  SEXP res, beta, Dev, iter, linpred;
+  PROTECT(beta = allocVector(REALSXP, L * p));
+  double *b = REAL(beta);
+  for (int j = 0; j < (L * p); j++) b[j] = 0;
+  PROTECT(Dev = allocVector(REALSXP, 1));
+  for (int i = 0; i < 1; i++) REAL(Dev)[i] = 0;
+  PROTECT(iter = allocVector(INTSXP, L));
+  for (int i = 0; i < L; i++) INTEGER(iter)[i] = 0;
+  PROTECT(linpred = allocVector(REALSXP, n));
+  double *lp = REAL(linpred);
+  for (int i = 0; i <  n; i++) lp[i] = 0;
+  //PROTECT(tst = allocVector(REALSXP, p));
+  //double *tstp = REAL(tst);
+  //for (int i = 0; i <  p; i++) tstp[i] = 0;
+  
+  //Intermediate quantities for internal use
+  double *a = Calloc(p, double); // Beta from previous iteration
+  for (int j = 0; j < p; j++) a[j] = 0;
+  double *eta = Calloc(n, double);
+  for (int i = 0; i < n; i++) eta[i] = 0;
+  double *diffBeta = Calloc(p, double);
+  for (int j = 0; j < p; j++) diffBeta[j] = 0;
+  
+  double grad, hess, l1, u, v, shift, si;
+  double *m = REAL(beta0_);
+  
+  int converged;
+  
+  //Pointers
+  double *x = REAL(x_);
+  double *y = REAL(y_);
+  double *lam = REAL(lambda_);
+  //double lam = REAL(lambda_)[0];
+  double esp = REAL(esp_)[0];
+  int max_iter = INTEGER(max_iter_)[0];
+  
+  
+  //end of declaration;
+  
+  //Outer loop for each lambda
+  for(int l = 0; l < L; l++) {
+    
+    for (int i = 0; i < n; i++) eta[i] = 0;
+    //initialization
+    for (int i = 0; i < n; i++) {
+      for (int j = 0; j < p; j++) {
+        eta[i] += m[j] * x[j * n + i];
+      } 
+    }
+    
+    // CAESAR Initialize eta and nullDev
+    nullDev = -2 * getLogLikelihood(y, eta, n); // Calculate null deviance at beta = 0
+    for (int j = 0; j < p; j++) a[j] = m[j];
+    
+    
+    while (INTEGER(iter)[l] < max_iter) {
+      //if (REAL(Dev)[0] - nullDev > 0.99 * nullDev) break;
+      
+      INTEGER(iter)[l]++;
+      
+      
+      // calculate gradient & hessian andupdate beta_j
+      for (int j = 0; j < p; j++) {
+        grad = getGradient(x, y, eta, n, j); // jth component of gradient [l'(b)]
+        hess = getHessian(x, eta, n, j); // jth component of hessian [l''(b)]
+        //u   = grad / n + (hess / n) * a[j]; // z in paper
+        //v   = hess / n;
+        
+        // Update b_j
+        l1 = lam[l] ; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
+        
+        //Do one dimensional ridge update.
+        b[l * p + j] = newBarL0(hess / n, grad / n, a[j], l1);
+        
+        //tstp[j] = 0;
+        //for (int i = 0; i < n; i++) tstp[j] += eta[i];
+        //tstp[j] = eta[i];
+        //if( newBarL0(hess / n, grad / n, a[j], l1) > 1E+05 ) {
+        //  tstp[j] = grad;
+        //  tstp[j+1] = hess;
+        //}
+        
+        // Update r
+        shift = b[l * p + j] - a[j];
+        if (shift != 0) {
+          for (int i = 0; i < n; i++) {
+            si = shift * x[j * n + i];
+            eta[i] += si;
+          }
+        } //end shift
+        
+        //tstp[j] = hess;
+        
+      } //for j = 0 to (p - 1)
+      // Check for convergence
+      //CAESAR added iteration number l
+      converged = checkConvergence(b, a, esp, p, l);
+      
+      //CAESAR update
+      //for (int i = 0; i < n; i++) eta[i] = 0;
+      //for (int i = 0; i < n; i++) {
+      //  for (int j = 0; j < p; j++) {
+      //    eta[i] += b[l * p + j] * x[j * n + i];
+      //  }
+      //}
+      
+      // CAESAR check
+      //for (int j = 0; j < p; j++) {
+      //  tstp[j] = fabs( (b[j] - a[j]) / a[j]) > esp;
+      //}
+      
+      for (int i = 0; i < p; i++)
+        a[i] = b[l * p + i];
+      
+      //Calculate deviance
+      REAL(Dev)[0] = -2 * getLogLikelihood(y, eta, n);
+      
+      //if (INTEGER(iter)[0] <= p)
+      //tstp[INTEGER(iter)[0]] = ( REAL(Dev)[0] - nullDev ) / nullDev;
+      //tstp[INTEGER(iter)[0]] = REAL(Dev)[0];
+      
+      //for (int i = 0; i < n; i++){
+      //  lp[i] = eta[i];
+      //}
+      
+      if (converged) break;
+      
+      //for converge
+    } //for while loop
+    
+  } //lambda loop
+  
+  res = cleanupCRR(a, eta, diffBeta, beta, Dev, iter, linpred);
+  return(res);
+}
+
 // Right now, changes are: disabling deviance check
 SEXP ccd_bar(SEXP x_, SEXP y_, SEXP lambda_,
                SEXP esp_, SEXP max_iter_, SEXP beta0_) {
@@ -283,9 +554,9 @@ SEXP ccd_bar(SEXP x_, SEXP y_, SEXP lambda_,
   PROTECT(linpred = allocVector(REALSXP, n));
   double *lp = REAL(linpred);
   for (int i = 0; i <  n; i++) lp[i] = 0;
-  PROTECT(tst = allocVector(REALSXP, p));
-  double *tstp = REAL(tst);
-  for (int i = 0; i <  p; i++) tstp[i] = 0;
+  //PROTECT(tst = allocVector(REALSXP, p));
+  //double *tstp = REAL(tst);
+  //for (int i = 0; i <  p; i++) tstp[i] = 0;
 
   //Intermediate quantities for internal use
   double *a = Calloc(p, double); // Beta from previous iteration
@@ -324,7 +595,7 @@ SEXP ccd_bar(SEXP x_, SEXP y_, SEXP lambda_,
     
     // CAESAR Initialize eta and nullDev
     nullDev = -2 * getLogLikelihood(y, eta, n); // Calculate null deviance at beta = 0
-    for (int j = 0; j < p; j++) a[j] = m[j];
+    for (int j = 0; j < p; j++) a[j] = m[l * p + j];
   
   
     while (INTEGER(iter)[l] < max_iter) {
@@ -353,6 +624,7 @@ SEXP ccd_bar(SEXP x_, SEXP y_, SEXP lambda_,
         //  tstp[j] = grad;
         //  tstp[j+1] = hess;
         //}
+        lp[j] = hess;
   
         // Update r
         shift = b[l * p + j] - a[j];
@@ -363,7 +635,7 @@ SEXP ccd_bar(SEXP x_, SEXP y_, SEXP lambda_,
           }
         } //end shift
         
-        tstp[j] = hess;
+        //tstp[j] = hess;
   
       } //for j = 0 to (p - 1)
       // Check for convergence
@@ -393,9 +665,9 @@ SEXP ccd_bar(SEXP x_, SEXP y_, SEXP lambda_,
         //tstp[INTEGER(iter)[0]] = ( REAL(Dev)[0] - nullDev ) / nullDev;
         //tstp[INTEGER(iter)[0]] = REAL(Dev)[0];
   
-      for (int i = 0; i < n; i++){
-        lp[i] = eta[i];
-      }
+      //for (int i = 0; i < n; i++){
+      //  lp[i] = eta[i];
+      //}
       
       if (converged) break;
       
@@ -404,8 +676,306 @@ SEXP ccd_bar(SEXP x_, SEXP y_, SEXP lambda_,
     
   } //lambda loop
   
-  res = cleanupCRR(a, eta, diffBeta, beta, Dev, iter, linpred, tst);
+  res = cleanupCRR(a, eta, diffBeta, beta, Dev, iter, linpred);
   return(res);
 }
 
+
+//int ccd_hybrid_ridge(double *x, double *y, double *lam,
+//                double esp, double *b, double *a, int n, int p, int l) {
+
+SEXP ccd_hybrid_ridge(SEXP x_, SEXP y_, SEXP lambda_,
+                     SEXP esp_, SEXP max_iter_, SEXP beta0_) {  
+  //Declaration
+  //Declaration
+  int n = length(y_);
+  int p = length(x_) / n;
+  int L = length(lambda_);
+  double nullDev;
+  
+  SEXP res, beta, Dev, iter, linpred;
+  PROTECT(beta = allocVector(REALSXP, L * p));
+  double *b = REAL(beta);
+  for (int j = 0; j < (L * p); j++) b[j] = 0;
+  PROTECT(Dev = allocVector(REALSXP, 1));
+  for (int i = 0; i < 1; i++) REAL(Dev)[i] = 0;
+  PROTECT(iter = allocVector(INTSXP, L));
+  for (int i = 0; i < L; i++) INTEGER(iter)[i] = 0;
+  PROTECT(linpred = allocVector(REALSXP, n));
+  double *lp = REAL(linpred);
+  for (int i = 0; i <  n; i++) lp[i] = 0;
+  
+  
+  //Intermediate quantities for internal use
+  double *etaa = Calloc(n, double);
+  for (int i = 0; i < n; i++) etaa[i] = 0;
+  double *diffBetaa = Calloc(p, double);
+  for (int j = 0; j < p; j++) diffBetaa[j] = 1;
+  double *aa = Calloc(p, double); // Beta from previous iteration
+  for (int j = 0; j < p; j++) aa[j] = 0;
+  //double *asquare = Calloc(p, double); // previous step beta estimate squared
+  //for (int j = 0; j < p; j++) asquare[j] = pow(a[j], 2);
+  
+  
+  double grad, hess, l1, shift, si, delta;
+  int converged;
+  int iterr = 0;
+  
+  //Intermediate quantities for internal use
+  //double *a = Calloc(p, double); // Beta from previous iteration
+ // for (int j = 0; j < p; j++) a[j] = 0;
+  
+  //Pointers
+  double *x = REAL(x_);
+  double *y = REAL(y_);
+  double *lam = REAL(lambda_);
+  double esp = REAL(esp_)[0];
+  double *m = REAL(beta0_);
+  int max_iter = INTEGER(max_iter_)[0];
+  
+  //initialization
+  nullDev = -2 * getLogLikelihood(y, etaa, n); // Calculate null deviance at beta = 0
+  
+  //for (int j = 0; j < p; j++) a[j] = b[j];
+  
+  //for (int i = 0; i < n; i++) etaa[i] = 0;
+  
+  //Outer loop for each lambda
+  for(int l = 0; l < L; l++) {
+    
+    for (int i = 0; i < n; i++) etaa[i] = 0;
+    //initialization
+    for (int i = 0; i < n; i++) {
+      for (int j = 0; j < p; j++) {
+        etaa[i] += m[j] * x[j * n + i];
+      } 
+    }
+    
+    // CAESAR Initialize eta and nullDev
+    nullDev = -2 * getLogLikelihood(y, etaa, n); // Calculate null deviance at beta = 0
+    for (int j = 0; j < p; j++) aa[j] = m[j];
+    
+    while (INTEGER(iter)[l] < 1000) {
+      //if (REAL(Dev)[0] - nullDev > 0.99 * nullDev) break;
+      
+      INTEGER(iter)[l]++;
+      
+      // calculate gradient & hessian andupdate beta_j
+      for (int j = 0; j < p; j++) {
+        grad = -getGradient(x, y, etaa, n, j); // jth component of gradient [l'(b)]
+        hess = getHessian(x, etaa, n, j); // jth component of hessian [l''(b)]
+        l1 = lam[l]; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
+        
+        delta =  -(grad / n + 2 * l1 / aa[j]) / (hess / n + 2 * l1 / pow(aa[j], 2));
+        //u   = grad / n + (hess / n) * a[j]; // z in paper
+        //v   = hess / n;
+        
+        //CAESAR add change l1 scale, to not divided by n
+        //if(j >= p) {
+        //  delta =  -(grad / n + a[j] * l1 / sqrt(sqsum)) / (hess / n + l1 * (1/sqrt(sqsum) - a[j] / pow(sqsum, 3/2)));
+        //} else {
+        //delta =  -(grad / n + 2 * a[j] * l1) / (hess / n + 2 * l1);
+        //}
+        
+        // Do one dimensional ridge update.
+        // Employ trust region as in Genkin et al. (2007) for quadratic approximation.
+        b[l * p + j] = aa[j] + sgn(delta) * fmin(fabs(delta), diffBetaa[j]);
+        diffBetaa[j] = fmax(2 * fabs(delta), diffBetaa[j] / 2);
+        //b[j] = a[j] + (xwr / n - a[j] * l1) / (xwx / n + l1);
+        
+        // CAESAR ADD
+        //sqsum = sqsum - pow(a[j], 2) + pow(b[j], 2);
+        
+        // Update r
+        shift = b[l * p + j] - aa[j];
+        if (shift != 0) {
+          for (int i = 0; i < n; i++) {
+            si = shift * x[j * n + i];
+            etaa[i] += si;
+          }
+        } //end shift
+        
+      } //for j = 0 to (p - 1)
+      // Check for convergence
+      converged = checkConvergence(b, aa, esp, p, l);
+      for (int i = 0; i < p; i++)
+        aa[i] = b[l * p + i];
+      
+      //Calculate deviance
+      //REAL(Dev)[0] = -2 * getLogLikelihood(y, eta, n);
+      
+      //for (int i = 0; i < n; i++){
+      //  lp[i] = eta[i];
+      //}
+      if (converged)  break;
+      //for converge
+    } //for while loop
+    
+    for (int i = 0; i < p; i++) {
+      if(fabs(b[l * p + i]) < 1E-6) b[l * p + i] = 0;
+    }
+    
+  }// lambda loop
+  //res = cleanupCRR(a, eta, diffBeta, beta, Dev, iter, linpred);
+  //return(res);
+  //Free(aa);
+  //Free(etaa);
+  //Free(diffBetaa);
+  //return(iter);
+  
+  
+  res = cleanupCRR(aa, etaa, diffBetaa, beta, Dev, iter, linpred);
+  return(res);
+}
+
+SEXP ccd_bar_hybrid(SEXP x_, SEXP y_, SEXP lambda_,
+              SEXP esp_, SEXP max_iter_, SEXP beta0_) {
+  
+  //Declaration
+  int n = length(y_);
+  int p = length(x_) / n;
+  int L = length(lambda_);
+  double nullDev;
+  
+  //Output
+  SEXP res, beta, Dev, iter, linpred, tst;
+  PROTECT(beta = allocVector(REALSXP, L * p));
+  double *b = REAL(beta);
+  for (int j = 0; j < (L * p); j++) b[j] = 0;
+  PROTECT(Dev = allocVector(REALSXP, 1));
+  for (int i = 0; i < 1; i++) REAL(Dev)[i] = 0;
+  PROTECT(iter = allocVector(INTSXP, L));
+  for (int i = 0; i < L; i++) INTEGER(iter)[i] = 0;
+  PROTECT(linpred = allocVector(REALSXP, n));
+  double *lp = REAL(linpred);
+  for (int i = 0; i <  n; i++) lp[i] = 0;
+  //PROTECT(tst = allocVector(REALSXP, p));
+  //double *tstp = REAL(tst);
+  //for (int i = 0; i <  p; i++) tstp[i] = 0;
+  
+  //Intermediate quantities for internal use
+  double *a = Calloc(p, double); // Beta from previous iteration
+  for (int j = 0; j < p; j++) a[j] = 0;
+  double *eta = Calloc(n, double);
+  for (int i = 0; i < n; i++) eta[i] = 0;
+  double *diffBeta = Calloc(p, double);
+  for (int j = 0; j < p; j++) diffBeta[j] = 0;
+  
+  double grad, hess, l1, u, v, shift, si;
+  double *m = REAL(beta0_);
+  
+  int converged;
+  int max_ridge_iter = 1000;
+  int ridgeiter = 0;
+  
+  //Pointers
+  double *x = REAL(x_);
+  double *y = REAL(y_);
+  double *lam = REAL(lambda_);
+  //double lam = REAL(lambda_)[0];
+  double esp = REAL(esp_)[0];
+  int max_iter = INTEGER(max_iter_)[0];
+  
+  
+  //end of declaration;
+  
+  //Outer loop for each lambda
+  for(int l = 0; l < L; l++) {
+    
+    for (int i = 0; i < n; i++) eta[i] = 0;
+    //initialization
+    for (int i = 0; i < n; i++) {
+      for (int j = 0; j < p; j++) {
+        eta[i] += m[j] * x[j * n + i];
+      } 
+    }
+    
+    for (int j = 0; j < p; j++) a[j] = m[j];
+    //ridgeiter = ccd_hybrid_ridge(x, y, lam, esp, b, a, n, p, l);
+    INTEGER(iter)[l] += ridgeiter; 
+    // CAESAR Initialize eta and nullDev
+    nullDev = -2 * getLogLikelihood(y, eta, n); // Calculate null deviance at beta = 0
+    for (int j = 0; j < p; j++) a[j] = b[l * p + j];
+
+    
+    while (INTEGER(iter)[l] < max_ridge_iter + max_iter) {
+      //if (REAL(Dev)[0] - nullDev > 0.99 * nullDev) break;
+      
+      INTEGER(iter)[l]++;
+      
+      
+      // calculate gradient & hessian andupdate beta_j
+      for (int j = 0; j < p; j++) {
+        grad = getGradient(x, y, eta, n, j); // jth component of gradient [l'(b)]
+        hess = getHessian(x, eta, n, j); // jth component of hessian [l''(b)]
+        //u   = grad / n + (hess / n) * a[j]; // z in paper
+        //v   = hess / n;
+        
+        // Update b_j
+        l1 = lam[l] ; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
+        
+        //Do one dimensional ridge update.
+        b[l * p + j] = newBarL0(hess / n, grad / n, a[j], l1);
+        
+        //tstp[j] = 0;
+        //for (int i = 0; i < n; i++) tstp[j] += eta[i];
+        //tstp[j] = eta[i];
+        //if( newBarL0(hess / n, grad / n, a[j], l1) > 1E+05 ) {
+        //  tstp[j] = grad;
+        //  tstp[j+1] = hess;
+        //}
+        
+        // Update r
+        shift = b[l * p + j] - a[j];
+        if (shift != 0) {
+          for (int i = 0; i < n; i++) {
+            si = shift * x[j * n + i];
+            eta[i] += si;
+          }
+        } //end shift
+        
+        //tstp[j] = hess;
+        
+      } //for j = 0 to (p - 1)
+      // Check for convergence
+      //CAESAR added iteration number l
+      converged = checkConvergence(b, a, esp, p, l);
+      
+      //CAESAR update
+      //for (int i = 0; i < n; i++) eta[i] = 0;
+      //for (int i = 0; i < n; i++) {
+      //  for (int j = 0; j < p; j++) {
+      //    eta[i] += b[l * p + j] * x[j * n + i];
+      //  }
+      //}
+      
+      // CAESAR check
+      //for (int j = 0; j < p; j++) {
+      //  tstp[j] = fabs( (b[j] - a[j]) / a[j]) > esp;
+      //}
+      
+      for (int i = 0; i < p; i++)
+        a[i] = b[l * p + i];
+      
+      //Calculate deviance
+      REAL(Dev)[0] = -2 * getLogLikelihood(y, eta, n);
+      
+      //if (INTEGER(iter)[0] <= p)
+      //tstp[INTEGER(iter)[0]] = ( REAL(Dev)[0] - nullDev ) / nullDev;
+      //tstp[INTEGER(iter)[0]] = REAL(Dev)[0];
+      
+      //for (int i = 0; i < n; i++){
+      //  lp[i] = eta[i];
+      //}
+      
+      if (converged) break;
+      
+      //for converge
+    } //for while loop
+
+  } //lambda loop
+  
+  res = cleanupCRR(a, eta, diffBeta, beta, Dev, iter, linpred);
+  return(res);
+}
 
