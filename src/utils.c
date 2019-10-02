@@ -812,7 +812,7 @@ SEXP ccd_hybrid_ridge(SEXP x_, SEXP y_, SEXP lambda_,
     } //for while loop
     
     for (int i = 0; i < p; i++) {
-      if(fabs(b[l * p + i]) < 1E-6) b[l * p + i] = 0;
+      if(fabs(b[l * p + i]) < 1E-7) b[l * p + i] = 0;
     }
     
   }// lambda loop
