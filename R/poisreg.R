@@ -19,6 +19,9 @@ poisBAR <- function(y, x, lambda = 0, xi = 5, delta = 0,
   } else if(xitype == "original") {
     ridgename = "ccd_ridge0"
     barname = "ccd_hybrid_ridge"
+  } else if(xitype == "hybrid") { 
+    ridgename = "ccd_ridge0"
+    barname = "ccd_bar_hybrid"
   } else stop("Error: xitype has to be either fixed or timesLam.")
   #####################################
   

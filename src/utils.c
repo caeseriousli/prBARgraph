@@ -860,8 +860,10 @@ SEXP ccd_bar_hybrid(SEXP x_, SEXP y_, SEXP lambda_,
   for (int i = 0; i < n; i++) eta[i] = 0;
   double *diffBeta = Calloc(p, double);
   for (int j = 0; j < p; j++) diffBeta[j] = 0;
+  double *diffBetaa = Calloc(p, double);
+  for (int j = 0; j < p; j++) diffBetaa[j] = 1;
   
-  double grad, hess, l1, u, v, shift, si;
+  double grad, hess, l1, u, v, shift, si, delta;
   double *m = REAL(beta0_);
   
   int converged;
@@ -898,7 +900,7 @@ SEXP ccd_bar_hybrid(SEXP x_, SEXP y_, SEXP lambda_,
     for (int j = 0; j < p; j++) a[j] = b[l * p + j];
 
     
-    while (INTEGER(iter)[l] < max_ridge_iter + max_iter) {
+    while (INTEGER(iter)[l] < 5) {
       //if (REAL(Dev)[0] - nullDev > 0.99 * nullDev) break;
       
       INTEGER(iter)[l]++;
@@ -912,7 +914,7 @@ SEXP ccd_bar_hybrid(SEXP x_, SEXP y_, SEXP lambda_,
         //v   = hess / n;
         
         // Update b_j
-        l1 = lam[l] ; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
+        l1 = lam[l] / n ; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
         
         //Do one dimensional ridge update.
         b[l * p + j] = newBarL0(hess / n, grad / n, a[j], l1);
@@ -972,6 +974,74 @@ SEXP ccd_bar_hybrid(SEXP x_, SEXP y_, SEXP lambda_,
       
       //for converge
     } //for while loop
+    
+    // initialize eta and aa for original BAR
+    for (int i = 0; i < n; i++) eta[i] = 0;
+    //initialization
+    for (int i = 0; i < n; i++) {
+      for (int j = 0; j < p; j++) {
+        eta[i] += a[j] * x[j * n + i];
+      } 
+    }
+    //for (int i = 0; i < p; i++)
+    //  a[i] = m[i];
+    
+    while (INTEGER(iter)[l] < 900) {
+      //if (REAL(Dev)[0] - nullDev > 0.99 * nullDev) break;
+      
+      INTEGER(iter)[l]++;
+      
+      // calculate gradient & hessian andupdate beta_j
+      for (int j = 0; j < p; j++) {
+        grad = -getGradient(x, y, eta, n, j); // jth component of gradient [l'(b)]
+        hess = getHessian(x, eta, n, j); // jth component of hessian [l''(b)]
+        l1 = lam[l]; //divide by n since we are minimizing the following: -(1/n)l(beta) + lambda * p(beta)
+        
+        delta =  -(grad / n + 2 * l1 / a[j]) / (hess / n + 2 * l1 / pow(a[j], 2));
+        //u   = grad / n + (hess / n) * a[j]; // z in paper
+        //v   = hess / n;
+        
+        //CAESAR add change l1 scale, to not divided by n
+        //if(j >= p) {
+        //  delta =  -(grad / n + a[j] * l1 / sqrt(sqsum)) / (hess / n + l1 * (1/sqrt(sqsum) - a[j] / pow(sqsum, 3/2)));
+        //} else {
+        //delta =  -(grad / n + 2 * a[j] * l1) / (hess / n + 2 * l1);
+        //}
+        
+        // Do one dimensional ridge update.
+        // Employ trust region as in Genkin et al. (2007) for quadratic approximation.
+        b[l * p + j] = a[j] + sgn(delta) * fmin(fabs(delta), diffBetaa[j]);
+        diffBetaa[j] = fmax(2 * fabs(delta), diffBetaa[j] / 2);
+        //b[j] = a[j] + (xwr / n - a[j] * l1) / (xwx / n + l1);
+        
+        // CAESAR ADD
+        //sqsum = sqsum - pow(a[j], 2) + pow(b[j], 2);
+        
+        // Update r
+        shift = b[l * p + j] - a[j];
+        if (shift != 0) {
+          for (int i = 0; i < n; i++) {
+            si = shift * x[j * n + i];
+            eta[i] += si;
+          }
+        } //end shift
+        
+      } //for j = 0 to (p - 1)
+      // Check for convergence
+      converged = checkConvergence(b, a, esp, p, l);
+      for (int i = 0; i < p; i++)
+        a[i] = b[l * p + i];
+      
+      //Calculate deviance
+      //REAL(Dev)[0] = -2 * getLogLikelihood(y, eta, n);
+      
+      //for (int i = 0; i < n; i++){
+      //  lp[i] = eta[i];
+      //}
+      if (converged)  break;
+      //for converge
+    } //for while loop
+    
 
   } //lambda loop
   
