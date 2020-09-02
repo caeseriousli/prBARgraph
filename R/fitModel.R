@@ -1,15 +1,16 @@
 #' Fit BAR Poisson Graphical Model.
 #' 
-#' @param dt nxp dataset.
-#' @param instabilities if not NA, shoose to use StARS instability for selecting a lambda. Run poisson_BAR_StARS() first to get StARS
-#' @param sequen to be used with instability a grid of l0/l1 penalization parameters to be chosen from.
-#' @param beta stability 
-#' @param regularization default to l0 (BAR). The function also supports l1 (LASSO Poisson)
-#' @param lchosen if not NA, do not use StARS to select Lambda. Instead, run all penalizations and return a list of adjacency matrices
-#' @return either an adjacenty matrix (selected by StARS), or a list of adjacency matrices, corresponding to each lambda supplied by 'lchose' option.
+#' @param dt any nxp matrix, or data frame. Design matrix to be fitted.
+#' @param instabilities a numeric vector, if not NA, shoose to use StARS instability for selecting a lambda. Run poisson_BAR_StARS() first to get StARS
+#' @param sequen a numeric vector, to be used with instability a grid of l0/l1 penalization parameters to be chosen from.
+#' @param beta a number, specifying stability threshold
+#' @param regularization a character, either default to "l0" (BAR). The function also supports "l1" (LASSO Poisson)
+#' @param lchosen a number or a vector of penalization (either for l0 or l1) parameters, if not NA, function will ignore StARS (instabilities, lams, and beta) to select Lambda. Instead, run all penalizations and return a list of adjacency matrices
+#' @return Either an adjacenty matrix (selected by StARS), or a list of adjacency matrices, corresponding to each lambda supplied by 'lchose' option.
 #' @export 
 #' @examples
 #' require(XMRF)
+#' require(doParallel)
 #' # Simulate RNA data from XMRF package (Wan, Y. W., et. al, 2016)
 #' Xsim <- XMRF.Sim(n=100, p=200, model="LPGM", graph.type="hub")
 #' 
@@ -19,24 +20,32 @@
 #' # Run StARS to calculate stability (Liu, H. et. al, 2010)
 #' stability_results = poisson_BAR_StARS(t(Xsim$X), sequen = sequenBAR)
 #' 
-#' # Use stability results to select a lambda and fit Poisson BAR graphical model
-#' # beta grid specifies stability thresholds by user. Function returns as many 
-#' # estimated adjacency matrices as the beta's supplied
+#' # Use stability results to select a lambda and 
+#' # fit Poisson BAR graphical model
+#' # beta grid specifies stability thresholds by user. 
+#' # Function returns as many estimated adjacency
+#' # matrices as the beta's supplied
 #' fitModel(t(Xsim200sf$X), stability_results, sequenBAR, beta=c(1,2), 
 #'          regularization = 'l0', lchosen = NA, xitype = "original")
 #'          
-#' # Alternatively, skip selecting tuning parameter by StARS, fit models on all lambdas
-#' # when  lchosen is supplied, the function will ignore stability results and beta grid
+#' # Alternatively, skip selecting tuning parameter by StARS, 
+#' # fit models on all lambdas
+#' # when  lchosen is supplied, the function will ignore 
+#' # stability results and beta grid
 #' fitl0 = fitModel(t(Xsim200sf$X), lchosen = sequenBAR, xitype = "original")
 #' 
 #' @references 
-#' Liu, H., Roeder, K., & Wasserman, L. (2010). Stability approach to regularization selection (stars) for high dimensional graphical models. In Advances in neural information processing systems (pp. 1432-1440).
-#' Wan, Y. W., Allen, G. I., Baker, Y., Yang, E., Ravikumar, P., Anderson, M., & Liu, Z. (2016). XMRF: an R package to fit Markov Networks to high-throughput genetics data. BMC systems biology, 10(3), 69.
+#' Liu, H., Roeder, K., & Wasserman, L. (2010). Stability approach to 
+#' regularization selection (stars) for high dimensional graphical models. 
+#' In Advances in neural information processing systems (pp. 1432-1440).
+#' Wan, Y. W., Allen, G. I., Baker, Y., Yang, E., Ravikumar, P., Anderson, 
+#' M., & Liu, Z. (2016). XMRF: an R package to fit Markov Networks 
+#' to high-throughput genetics data. BMC systems biology, 10(3), 69.
 
-fitModel <- function(dt, instabilities, sequen, beta = .05, regularization = "l0", 
-                     lchosen = NA, th = NA, first.timer = TRUE, xitype = "original") {
+fitModel <- function(dt, instabilities, lams, beta = .05, regularization = "l0", 
+                     lchosen = NA, th = NA) {
+  xitype = "original"
   library(doParallel)
-  
   if(is.na(lchosen[1])) {
     Dbar = data.frame(1/sequen, instabilities)
   
@@ -65,7 +74,7 @@ fitModel <- function(dt, instabilities, sequen, beta = .05, regularization = "l0
   n = nrow(dt)
   print(log(n)/2)
   
-  if(first.timer == TRUE) {
+  if(TRUE) {
     # cores = detectCores()
     # cl <- makeCluster((5), type = "PSOCK")
     # registerDoParallel(cl)
