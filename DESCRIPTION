@@ -16,3 +16,7 @@ LazyData: true
 RoxygenNote: 6.1.1.9000
 NeedsCompilation: yes
 Packaged: 2019-04-18 17:23:21 UTC; caesar
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr

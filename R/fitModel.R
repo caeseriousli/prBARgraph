@@ -2,7 +2,7 @@
 #' 
 #' @param dt any nxp matrix, or data frame. Design matrix to be fitted.
 #' @param instabilities a numeric vector, if not NA, shoose to use StARS instability for selecting a lambda. Run poisson_BAR_StARS() first to get StARS
-#' @param sequen a numeric vector, to be used with instability a grid of l0/l1 penalization parameters to be chosen from.
+#' @param lams a numeric vector, to be used with instability a grid of l0/l1 penalization parameters to be chosen from.
 #' @param beta a number, specifying stability threshold
 #' @param regularization a character, either default to "l0" (BAR). The function also supports "l1" (LASSO Poisson)
 #' @param lchosen a number or a vector of penalization (either for l0 or l1) parameters, if not NA, function will ignore StARS (instabilities, lams, and beta) to select Lambda. Instead, run all penalizations and return a list of adjacency matrices
@@ -41,6 +41,7 @@
 #' Wan, Y. W., Allen, G. I., Baker, Y., Yang, E., Ravikumar, P., Anderson, 
 #' M., & Liu, Z. (2016). XMRF: an R package to fit Markov Networks 
 #' to high-throughput genetics data. BMC systems biology, 10(3), 69.
+#' "Reference to our paper"
 
 fitModel <- function(dt, instabilities, lams, beta = .05, regularization = "l0", 
                      lchosen = NA, th = NA) {
@@ -72,13 +73,13 @@ fitModel <- function(dt, instabilities, lams, beta = .05, regularization = "l0",
   nlambda = length(lchosen)
   p = ncol(dt)
   n = nrow(dt)
-  print(log(n)/2)
+  #print(log(n)/2)
   
   if(TRUE) {
     # cores = detectCores()
     # cl <- makeCluster((5), type = "PSOCK")
     # registerDoParallel(cl)
-    registerDoParallel(4)
+    #registerDoParallel(4)
   }
   #iterate through features
   stackedA = foreach(j = 1:ncol(dt), .combine = cbind, .packages = c('doParallel', 'glmnet')) %dopar% {
@@ -144,7 +145,7 @@ fitModel <- function(dt, instabilities, lams, beta = .05, regularization = "l0",
   }
 
   #stopCluster()
-  closeAllConnections()
+  #closeAllConnections()
   
   return(A.results)
   

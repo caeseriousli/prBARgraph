@@ -1,0 +1,93 @@
+---
+title: "vignettes"
+author: "Caesar Z. Li, Eric Kawaguchi, Gang Li"
+date: "10/3/2020"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Put the title of your vignette here}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## prBBARgraph  v1.0.1
+
+prBBARgraph is an R package for fitting Broken Adaptive Ridge (BAR) penalized log linear graphical models. It is particularly tailored for fitting graphical models on RNAseq count data. For more details on Broken Adaptive Ridge, see <https://www.sciencedirect.com/science/article/pii/S0047259X17305067>.
+
+
+### Data: simulated based on common network topologies 
+
+```{r echo=FALSE}
+# Simulate RNA-seq data using XMRF package (Wan, Y. W., et. al., 2016)
+library(XMRF)
+Xsim200sf <- XMRF.Sim(n=500, p=100, model="LPGM", graph.type="scale-free")
+miRNAseq.X = t(Xsim200sf$X)
+
+#miRNAseq.X = cbind(miRNAseq.X, matrix(0, nrow = nrow(miRNAseq.X), ncol = 30))
+
+# FOR REAL RNA-SEQ DATA ONLY
+# # Pre-processing RNA-seq data (Allen, G. I., & Liu, Z., 2012)
+# miRNAseq.X = preFiltering(miRNAseq.X)
+# miRNAseq.X = processSeq(miRNAseq.X, quanNorm = 0.75, nLowCount = 20,
+#                         percentLowCount = 0.80, NumGenes = 50, PercentGenes = 0.9)
+
+```
+
+## Option 1 
+
+Specify a grid of tuning parameters and return all penalized networks, from sparse to dense
+
+
+```{r eval=FALSE}
+library(prBARgraph)
+
+# Specify a grid of lambdas and run the model
+lambdas = 2^seq(logb(15, base = 2), logb(1e-4, base = 2), length = 20)
+fitl0 = fitModel(dt = miRNAseq.X, lams = NA, regularization = 'l0', lchosen = lambdas)
+```
+
+plot one of the results and compare it to the "truth" (the known randomly-generated topology that we base on to generate the data)
+```{r eval=FALSE}
+og = outputNetwork(Xsim200sf$B)
+Coords <- layout_with_fr(og) %>% as_tibble %>%
+    bind_cols(data_frame(names = names(V(og))))
+xrange = range(Coords$V1)
+yrange = range(Coords$V2)
+
+# Estimates
+sync.structure = outputNetwork(fitl0[[6]], filterNoConnections = FALSE, label.cex = 1)
+plot(sync.structure, vertex.size= 3*(yrange[2] - yrange[1]),
+         layout = as.matrix(Coords[,1:2]),rescale=F,xlim=xrange,ylim=yrange,
+         width = 15)
+# "Truth"
+sync.structure = outputNetwork(Xsim200sf$B, filterNoConnections = FALSE, label.cex = 1)
+#V(sync.structure)$size <- rep(90, length(V(sync.structure)$label.cex))
+plot(sync.structure, vertex.size= 3*(yrange[2] - yrange[1]), rescale = F,
+         layout = as.matrix(Coords[,1:2]),rescale=F,xlim=xrange,ylim=yrange,
+         width = 17)
+```
+
+## Option 2
+
+Using STARS stability algorithm to choose among tuning parameters, and return the maximum tuning parater given a specified acceptable estimation stability.
+
+```{r eval=FALSE}
+myinstabilities = poisson_BAR_StARS(miRNAseq.X, sequen = lambdas)
+fitl0 = fitModel(et = miRNAseq.X, instabilities = myinstabilities, 
+                 lams = sequen, beta=c(1,2), regularization = 'l0', lchosen = NA)
+
+```
+## References
+
+    Allen, G. I., & Liu, Z. (2012, October). A log-linear graphical model for inferring genetic networks from high-throughput sequencing data. In 2012 IEEE International Conference on Bioinformatics and Biomedicine (pp. 1-6). IEEE.
+
+    Dai, L., Chen, K., Sun, Z., Liu, Z., & Li, G. (2018). Broken adaptive ridge regression and its asymptotic properties. Journal of multivariate analysis, 168, 334-351.
+    
+    Wan, Y. W., Allen, G. I., Baker, Y., Yang, E., Ravikumar, P., Anderson, M., & Liu, Z. (2016). XMRF: an R package to fit Markov Networks to high-throughput genetics data. BMC systems biology, 10(3), 69.
+    
+    
+    
+    

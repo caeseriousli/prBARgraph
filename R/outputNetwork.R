@@ -1,4 +1,5 @@
-#' @name Plot Network from an Adjacency Matrix
+#' Plot Network from an Adjacency Matrix
+#' 
 #' @param A nxn matrix, or data frame, adjacenty matrix to be plotted
 #' @param filterNoConnections logic, TRUE: filter out nodes that have no connections to any other node. FALSE: keep all nodes
 #' @param label.cex specify label font sizes. If NA (default), use default size.

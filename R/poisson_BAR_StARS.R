@@ -33,7 +33,7 @@ poisson_BAR_StARS <- function(dt, sequen = sequen, eps = .01) {
   #cores = detectCores()
   #cl <- makeCluster((cores-1), type = "PSOCK")
   #registerDoParallel(cl)
-  registerDoParallel(4)
+  #registerDoParallel(4)
   
   #iterate through features
   instability.stacked = foreach(j = 1:p, .combine = cbind, .packages = c('doParallel')) %:%
@@ -110,7 +110,7 @@ poisson_BAR_StARS <- function(dt, sequen = sequen, eps = .01) {
   }
   
   #stopCluster(cl)
-  closeAllConnections()
+  #closeAllConnections()
   
   ####### Plot Results ##############
   stability.graph = rbind(sequen, instability.results)

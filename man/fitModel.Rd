@@ -12,13 +12,13 @@ fitModel(dt, instabilities, lams, beta = 0.05, regularization = "l0",
 
 \item{instabilities}{a numeric vector, if not NA, shoose to use StARS instability for selecting a lambda. Run poisson_BAR_StARS() first to get StARS}
 
+\item{lams}{a numeric vector, to be used with instability a grid of l0/l1 penalization parameters to be chosen from.}
+
 \item{beta}{a number, specifying stability threshold}
 
 \item{regularization}{a character, either default to "l0" (BAR). The function also supports "l1" (LASSO Poisson)}
 
 \item{lchosen}{a number or a vector of penalization (either for l0 or l1) parameters, if not NA, function will ignore StARS (instabilities, lams, and beta) to select Lambda. Instead, run all penalizations and return a list of adjacency matrices}
-
-\item{sequen}{a numeric vector, to be used with instability a grid of l0/l1 penalization parameters to be chosen from.}
 }
 \value{
 Either an adjacenty matrix (selected by StARS), or a list of adjacency matrices, corresponding to each lambda supplied by 'lchose' option.
@@ -60,4 +60,5 @@ In Advances in neural information processing systems (pp. 1432-1440).
 Wan, Y. W., Allen, G. I., Baker, Y., Yang, E., Ravikumar, P., Anderson, 
 M., & Liu, Z. (2016). XMRF: an R package to fit Markov Networks 
 to high-throughput genetics data. BMC systems biology, 10(3), 69.
+"Reference to our paper"
 }
