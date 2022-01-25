@@ -76,11 +76,11 @@ plot(outputNetwork(fit[[9]]))
 
 ### Current Projects
 
-<img src="inst/network1.pdf?raw=true"/>
+![firstplot](inst/network4.pdf)
 
 ---
 
-<img src="inst/network4.pdf?raw=true"/>
+<img src="inst/network4.png?raw=true"/>
 
 ---
 
