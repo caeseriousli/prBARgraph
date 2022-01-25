@@ -79,9 +79,9 @@ Since we gave 10 lambdas, the fitModel function returns a list of 10 [adjacency 
 ```{r}
 plot(outputNetwork(fit[[1]]))
 
-plot(outputNetwork(fit[[6]]))
+plot(outputNetwork(fit[[4]]))
 
-plot(outputNetwork(fit[[9]]))
+plot(outputNetwork(fit[[7]]))
 
 ```
 
@@ -95,6 +95,6 @@ plot(outputNetwork(fit[[9]]))
 
 ---
 
-<img src="inst/network9.png?raw=true"/>
+<img src="inst/network7.png?raw=true"/>
 
 
