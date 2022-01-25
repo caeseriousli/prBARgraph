@@ -84,9 +84,6 @@ plot(outputNetwork(fit[[4]]))
 plot(outputNetwork(fit[[7]]))
 
 ```
-
-### Current Projects
-
 <img src="inst/network1.png?raw=true"/>
 
 ---
